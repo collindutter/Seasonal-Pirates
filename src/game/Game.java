@@ -50,7 +50,7 @@ public class Game extends Canvas implements Runnable
 	public static void main(String[] args)
 	{
 		Game game = new Game();
-		JFrame frame = new JFrame("Seasonal Pirates Adventure 2: Exploring Davy Jones Locker- Collin, Kyle, Ryan");
+		JFrame frame = new JFrame("Seasonal Pirates");
 		
 		frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
 		frame.setResizable(false);
