@@ -1,0 +1,237 @@
+package entity;
+import java.util.ArrayList;
+import game.Game;
+import tiles.Node;
+import tiles.Tile;
+
+public class PathFinder
+{
+	private static int diagonalCost = 14;
+	private static int orthogonalCost = 10;
+	
+//	protected TreeSet<Node> openList = new TreeSet<Node>();
+//	protected ArrayList<Node> closedList = new ArrayList<Node>(200);
+//	protected ArrayList<Integer> path = new ArrayList<Node>();
+	private Node[] openList;
+	private boolean[][] inOpenList;
+//    private Node[] closedList;
+    private boolean[][] inClosedList;
+	private ArrayList<Node> path;
+	private int[][] fScores;
+	private int[][] hScores;
+	private int[][] gScores;
+	private Node[][] parents;
+	private double cameraCol, cameraRow;
+	
+	
+	public ArrayList<Node> calculatePath(Entity entity, int destinationCol, int destinationRow)
+	{
+		if(!Game.getWorld().getTile(destinationCol, destinationRow).isWalkable())
+			return null;
+		
+		//create lists
+		int openListSize = 0;
+		
+		cameraCol = Game.getWorld().getCamera().getCol();
+		cameraRow = Game.getWorld().getCamera().getRow();
+		
+		int startCol = (int)(entity.getCol() - cameraCol);
+		int startRow = (int)(entity.getRow() - cameraRow);
+		
+		destinationCol -= cameraCol;
+		destinationRow -= cameraRow;
+		
+		int listLength = (int)((Math.abs(destinationCol - entity.getCol()) > Math.abs(destinationRow - entity.getRow()) ? Math.abs((destinationCol - entity.getCol())) * 1.5 + 10 : Math.abs(destinationRow - entity.getRow())) * 1.5 + 10);
+//		int listLength = (int)(((Math.abs(destinationCol - entity.getCol()) + Math.abs(destinationRow) - entity.getRow())) * 1.5) + 10;
+		
+		openList = new Node[listLength];//this array does not need to be sorted or maintained
+		inOpenList = new boolean[listLength][listLength];//marks if the position is in the openlist
+		inClosedList = new boolean[listLength][listLength];//marks if the position is in the closedlist
+		path = new ArrayList<Node>(listLength);
+		
+		fScores = new int[listLength][listLength];
+		hScores = new int[listLength][listLength];
+		gScores = new int[listLength][listLength];
+		parents = new Node[listLength][listLength];
+		
+		//startTile
+		openList[0] = new Node(startCol, startRow);
+		inOpenList[startCol][startRow] = true;
+		openListSize++;
+		
+		for(int row = startRow - 1; row <= startRow + 1; row++)
+		{
+			for(int col = startCol - 1; col <= startCol + 1; col++)
+			{
+				if(row == startRow && col == startCol)
+					continue;
+				if(Game.getWorld().getTileID(col + cameraCol, row + cameraRow) == Tile.NULL_TILE)
+					continue;
+				if(Game.getWorld().getTile(col + cameraCol, row + cameraRow).isWalkable())
+				{
+					openList[openListSize] = new Node(col, row);
+					inOpenList[col][row] = true;
+					openListSize++;
+					parents[col][row] = new Node(startCol, startRow);
+					calcH(col, row, entity);
+					calcG(col, row);
+					
+					fScores[col][row] = gScores[col][row] + hScores[col][row];
+				}
+			}
+		}
+		
+		inClosedList[startCol][startRow] = true;
+		inOpenList[startCol][startRow] = false;
+		openListSize--;
+		
+		do
+		{
+			if(inClosedList[destinationCol][destinationRow] == true)
+			{
+				Node pathNode = new Node(destinationCol , destinationRow);
+				//build path
+				System.out.println(openList);
+				System.out.println(parents);
+				while(true)
+				{
+					path.add(0, pathNode);
+					pathNode = parents[pathNode.getCol()][pathNode.getRow()];
+					if(pathNode != null)
+						System.out.println(pathNode.getCol() + " " + pathNode.getRow());
+					if(pathNode == null)
+					{	
+						for(Node node : path)
+							node = new Node((int)(node.getCol() + cameraCol), (int)(node.getRow() + cameraRow));
+						return path;
+					}
+				}
+			}
+			
+			Node currentNode = getLowestF();
+			
+			inClosedList[currentNode.getCol()][currentNode.getRow()] = true;
+			inOpenList[currentNode.getCol()][currentNode.getRow()] = false;
+			openListSize--;
+			
+			for(int row = currentNode.getRow() - 1; row <= currentNode.getRow() + 1; row++)
+			{
+				outer:
+				for(int col = currentNode.getCol() - 1; col <= currentNode.getCol() + 1; col++)
+				{
+					if(Game.getWorld().getTileID(col + cameraCol, row + cameraRow) == Tile.NULL_TILE)
+						continue outer;
+					//if the adjacent square is in the closedList already, ignore it.
+					if(inClosedList[col][row] == true)
+						continue outer;
+					//if the adjacent square is not walkable, ignore it.
+					if(!Game.getWorld().getTile(col + cameraCol, row + cameraRow).isWalkable())
+						continue outer;
+					
+					//if the adjacent square is not in the open list, add and set parent
+					//"If it isn’t on the open list, add it to the open list. Make the current square the parent of this square. Record the F, G, and H costs of the square."
+					if(inOpenList[col][row] == false)
+					{
+						openList[openListSize] = new Node(col, row);
+						inOpenList[col][row] = true;
+						openListSize++;
+						parents[col][row] = new Node(currentNode.getCol(), currentNode.getRow());
+						calcH(col, row, entity);
+						calcG(col, row);
+						fScores[col][row] = gScores[col][row] + hScores[col][row];
+						continue outer;
+					}//"If it is on the open list already, check to see if this path to that square is better, using G cost as the measure. 
+						//A lower G cost means that this is a better path. If so, change the parent of the square to the current square, and recalculate the G and F scores of the square.
+						//If you are keeping your open list sorted by F score, you may need to resort the list to account for the change."
+					else if(inOpenList[col][row] == true)//if its already in the openList, check for better path
+					{
+						calcG(col, row);
+						int oldGScore = gScores[col][row];
+						calcG(col, row, currentNode.getCol(), currentNode.getRow());
+						int newGScore = gScores[col][row]; 
+						if(newGScore < oldGScore)
+						{
+							parents[col][row] = new Node(currentNode.getCol(), currentNode.getRow());
+							calcG(col, row);
+							fScores[col][row] = gScores[col][row] + hScores[col][row];
+						}
+					}
+				}
+			}
+			
+		}while(openListSize > 0);
+		System.out.println("finished");
+		return null;
+	}
+	
+	private Node getLowestF()
+	{
+		//col and row of node with the lowest f score
+		int lowestFCol = 0;
+		int lowestFRow = 0;
+		boolean firstElementFound = false;
+		for(int i = 0; i < openList.length; i++)
+		{
+			if(openList[i] == null)//skip it if its null
+				continue;
+			
+			if(inOpenList[openList[i].getCol()][openList[i].getRow()] == false)//skip if its not actually in the open list
+				continue;
+			
+			if(firstElementFound == false) //if the first element is found, set col and row
+			{
+				lowestFCol = openList[i].getCol();
+				lowestFRow = openList[i].getRow();
+				firstElementFound = true;
+//				System.out.println(fScores[lowestFCol][lowestFRow]);
+			}  
+				
+			if(fScores[openList[i].getCol()][openList[i].getRow()] < fScores[lowestFCol][lowestFRow]) //if the score is lower, reassign col and row
+			{													//if the f scores are the same, reassign so that it is the most recent node 
+				lowestFCol = openList[i].getCol();
+				lowestFRow = openList[i].getRow();
+			}
+		}
+		return new Node(lowestFCol, lowestFRow);
+	}
+	
+	private void calcH(int col, int row, Entity entity)
+	{
+//		int xDistance = (int) Math.abs(col - entity.getDestinationCol());
+//		int yDistance = (int) Math.abs(row - entity.getDestinationRow());
+//		if (xDistance > yDistance)
+//			hScores[col][row] = diagonalCost * yDistance + orthogonalCost * (xDistance - yDistance);
+//		else
+//			hScores[col][row] = diagonalCost * xDistance + orthogonalCost * (yDistance - xDistance);
+		hScores[col][row] = (int) (orthogonalCost * (Math.abs(col - entity.getDestinationCol()) + Math.abs(row - entity.getDestinationRow())));
+	}
+	
+	private void calcG(int col, int row)
+	{
+		int parentNodeCol = parents[col][row].getCol();
+		int parentNodeRow = parents[col][row].getRow();
+		//add appropriate g score for this tile
+		gScores[col][row] += ((col - parentNodeCol) & (row - parentNodeRow)) == 0 ? 10 : 14;
+		//add the cost of the tile
+		gScores[col][row] += Game.getWorld().getTile(col + cameraCol, row + cameraRow).getCost();
+		//add the parent's g score to this tile's g score
+		gScores[col][row] += gScores[parentNodeCol][parentNodeRow];
+	}
+	
+	private void calcG(int col, int row, int parentNodeCol, int parentNodeRow)
+	{
+		//add appropriate g score for this tile
+		gScores[col][row] += ((col - parentNodeCol) & (row - parentNodeRow)) == 0 ? 10 : 14;
+		//add the cost of the tile
+		gScores[col][row] += Game.getWorld().getTile(col + cameraCol, row + cameraRow).getCost();
+		//add the parent's g score to this tile's g score
+		gScores[col][row] += gScores[parentNodeCol][parentNodeRow];
+	}
+	
+	
+	public ArrayList<Node> findStraightPath(Entity entity, int destinationCol, int destinationRow)
+	{
+		double angle = Math.atan2(destinationRow - entity.getRow(), destinationCol - entity.getCol());
+		return null;
+	}
+}
